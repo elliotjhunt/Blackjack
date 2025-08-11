@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Blackjack Counting Trainer + Illustrious 18</title>
+<style>
+  :root{ --felt:#0b5; --table:#0a4a2a; --card:#fff; --ink:#111; --ink-red:#b10; }
+  *{ box-sizing:border-box }
+  html,body{ margin:0; background:var(--felt); color:#fff; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif }
+  header{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; padding:12px 16px;
+          background:linear-gradient(180deg,#083,#062); border-bottom:1px solid rgba(255,255,255,.15) }
+  header h1{ font-size:18px; margin:0 }
+  .controls{ display:flex; gap:10px; flex-wrap:wrap; align-items:center }
+  .controls label{ font-size:12px; opacity:.9 }
+  .controls input,.controls select,.controls button{
+    padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,.2); background:#0b6; color:#fff
+  }
+  .controls input[type="number"]{ width:74px }
+  .controls button{ font-weight:600; cursor:pointer }
+  .controls .ghost{ background:transparent; border-color:rgba(255,255,255,.35) }
+  .controls .danger{ background:#c33 }
+  main{ padding:16px }
+  .table{
+    border-radius:18px; padding:18px; min-height:360px;
+    background:radial-gradient(ellipse at center,var(--felt) 0%,var(--table) 70%);
+    border:1px solid rgba(255,255,255,.12); box-shadow:inset 0 10px 30px rgba(0,0,0,.35)
+  }
+  .cards{
+    display:flex; flex-wrap:wrap; gap:10px; padding:10px; min-height:120px; align-items:flex-end;
+    border:1px dashed rgba(255,255,255,.2); border-radius:12px; background:rgba(255,255,255,.05)
+  }
+  .card{
+    width:64px; height:92px; border-radius:8px; background:var(--card); color:var(--ink);
+    box-shadow:0 2px 6px rgba(0,0,0,.35); display:grid; grid-template-rows: 1fr auto; place-items:center
+  }
+  .rank{ font-weight:800; font-size:24px; margin-top:8px }
+  .pip{ font-size:18px; margin-bottom:8px; opacity:.9 }
+  .card.red{ color:var(--ink-red) }
+  .hud{ display:grid; grid-template-columns:repeat(4,minmax(160px,1fr)); gap:12px; margin-top:16px }
+  .tile{ background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.15); border-radius:12px; padding:12px }
+  .tile h3{ margin:0 0 6px 0; font-size:12px; letter-spacing:.3px; text-transform:uppercase; opacity:.9 }
+  .big{ font-size:28px; font-weight:800; letter-spacing:.3px; font-variant-numeric:tabular-nums }
+  .mono{ font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace }
+  .meter{ height:10px; border-radius:999px; background:rgba(0,0,0,.25); overflow:hidden }
+  .meter>div{ height:100%; width:0%; background:linear-gradient(90deg,#ff7675,#f2c14e,#55efc4) }
+  .log{ height:150px; overflow:auto; font-size:12px; background:rgba(0,0,0,.25); border-radius:8px; padding:8px }
+  .prompt{ position:fixed; inset:0; display:none; place-items:center; background:rgba(0,0,0,.5) }
+  .box{ width:min(640px,94vw); background:#123652; color:#fff; border-radius:14px; padding:16px;
+        border:1px solid rgba(255,255,255,.18); box-shadow:0 10px 40px rgba(0,0,0,.5) }
+  .grid{ display:grid; gap:10px }
+  .cols-3{ grid-template-columns:1fr 1fr 1fr }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; background:#0a8150; font-size:12px }
+  .muted{ opacity:.85; font-size:12px }
+  .pill{ display:inline-block; padding:6px 10px; border-radius:999px; border:1px solid rgba(255,255,255,.25); cursor:pointer; user-select:none }
+  .pill.active{ background:#0b6; border-color:#0b6 }
+  .row-end{ display:flex; justify-content:flex-end; gap:8px }
+</style>
+</head>
+<body>
+<header>
+  <h1>Blackjack Counting Trainer</h1>
+  <div class="controls">
+    <label>Decks <input id="decks" type="number" min="1" max="8" value="6"></label>
+    <label>Pen <input id="pen" type="number" min="0.50" max="0.95" step="0.05" value="0.80"></label>
+    <label>Speed ms <input id="speed" type="number" min="100" step="50" value="700"></label>
+    <label>Checkpoint <input id="checkpoint" type="number" min="10" step="1" value="26"></label>
+    <select id="mode">
+      <option value="withDecks">Show decks remaining</option>
+      <option value="blind">Blind decks remaining</option>
+    </select>
+    <button id="startBtn">Start</button>
+    <button id="pauseBtn" class="ghost">Pause</button>
+    <button id="resetBtn" class="danger">Reset</button>
+  </div>
+</header>
+
+<main>
+  <div class="table">
+    <div class="cards" id="cards"></div>
+
+    <div class="hud">
+      <div class="tile"><h3>Running</h3><div id="running" class="big mono">0</div></div>
+      <div class="tile"><h3>Decks Remaining</h3><div id="decksRem" class="big mono">—</div></div>
+      <div class="tile"><h3>True (hidden while dealing)</h3><div id="true" class="big mono">—</div></div>
+      <div class="tile">
+        <h3>Penetration</h3>
+        <div class="meter"><div id="penBar"></div></div>
+        <div class="muted"><span id="cardsSeen">0</span> cards dealt</div>
+      </div>
+    </div>
+
+    <div class="hud" style="margin-top:12px">
+      <div class="tile" style="grid-column:1/-1">
+        <h3>Session Log</h3>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<!-- Checkpoint Prompt -->
+<div class="prompt" id="prompt">
+  <div class="box">
+    <h2>Checkpoint <span class="mono" id="cpIndex">#</span></h2>
+    <p class="muted">Enter your counts, then answer the Illustrious 18 question.</p>
+    <div class="grid cols-3">
+      <label>Your Running <input id="inRunning" type="number" step="1" class="mono"></label>
+      <label>Your True <input id="inTrue" type="number" step="0.01" class="mono"></label>
+      <div><div class="muted">Current TC</div><div id="currentTC" class="mono badge">TC ?</div></div>
+    </div>
+    <div style="margin-top:8px">
+      <div><strong>Illustrious 18</strong> <span class="muted">(6D S17/DAS thresholds)</span></div>
+      <div id="i18Text" class="mono" style="margin-top:6px"></div>
+      <div style="margin-top:6px">
+        <span class="pill" data-choice="deviation">Take deviation</span>
+        <span class="pill" data-choice="basic">Stick with basic</span>
+      </div>
+    </div>
+    <div class="row-end" style="margin-top:10px">
+      <button id="revealBtn" class="ghost">Reveal Answers</button>
+      <button id="submitBtn">Submit</button>
+    </div>
+    <div id="answer" class="muted" style="margin-top:8px; display:none">
+      <div>Correct Running: <span class="mono" id="ansRunning">—</span></div>
+      <div>Correct True: <span class="mono" id="ansTrue">—</span></div>
+      <div id="i18Ans" style="margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  // ==== Data ====
+  const HI_LO = {'2':1,'3':1,'4':1,'5':1,'6':1,'7':0,'8':0,'9':0,'10':-1,'J':-1,'Q':-1,'K':-1,'A':-1};
+  const RANKS = Object.keys(HI_LO);
+  const SUITS = ['\\u2660','\\u2665','\\u2666','\\u2663'];
+  const I18 = [
+    ["Insurance","Take",3],["16 vs 10","Stand",0],["15 vs 10","Stand",4],["10 vs 10","Double",4],
+    ["12 vs 3","Stand",2],["12 vs 2","Stand",3],["11 vs A","Double",1],["9 vs 2","Double",1],
+    ["10 vs A","Double",4],["9 vs 7","Double",3],["16 vs 9","Stand",5],["13 vs 2","Stand",-1],
+    ["12 vs 4","Hit",0],["12 vs 5","Hit",-2],["12 vs 6","Hit",-1],["13 vs 3","Stand",-2],
+    ["15 vs 9","Stand",5],["10 vs 7","Double",4],
+  ];
+
+  // ==== DOM ====
+  const cardsEl = document.getElementById('cards');
+  const runningEl = document.getElementById('running');
+  const decksRemEl = document.getElementById('decksRem');
+  const penBar = document.getElementById('penBar');
+  const cardsSeenEl = document.getElementById('cardsSeen');
+  const logEl = document.getElementById('log');
+
+  const decksInput = document.getElementById('decks');
+  const penInput = document.getElementById('pen');
+  const speedInput = document.getElementById('speed');
+  const checkpointInput = document.getElementById('checkpoint');
+  const modeSelect = document.getElementById('mode');
+
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resetBtn = document.getElementById('resetBtn');
+
+  // Prompt elements
+  const promptEl = document.getElementById('prompt');
+  const cpIndexEl = document.getElementById('cpIndex');
+  const inRunning = document.getElementById('inRunning');
+  const inTrue = document.getElementById('inTrue');
+  const currentTCEl = document.getElementById('currentTC');
+  const ansBox = document.getElementById('answer');
+  const ansRunning = document.getElementById('ansRunning');
+  const ansTrue = document.getElementById('ansTrue');
+  const submitBtn = document.getElementById('submitBtn');
+  const revealBtn = document.getElementById('revealBtn');
+  const i18Text = document.getElementById('i18Text');
+  const i18Ans = document.getElementById('i18Ans');
+  const i18Choices = Array.from(document.querySelectorAll('[data-choice]'));
+
+  // ==== State ====
+  let state = {
+    settings: { decks:6, pen:0.8, speed:700, checkpoint:26, mode:'withDecks' },
+    shoe: [], cutIndex:0, i:0, running:0, timer:null, paused:true,
+    results: [], userChoice:null, i18Pick:null
+  };
+
+  // ==== Helpers ====
+  function clampInt(v,min,max,fb){ v=parseInt(v,10); return Number.isFinite(v)? Math.max(min,Math.min(max,v)) : fb; }
+  function clampFloat(v,min,max,fb){ v=parseFloat(v); return Number.isFinite(v)? Math.max(min,Math.min(max,v)) : fb; }
+  function buildShoe(decks=6){
+    const s=[];
+    for(let d=0; d<decks; d++){
+      for(let su=0; su<4; su++){
+        for(const r of RANKS){ s.push({rank:r,suit:SUITS[su]}); }
+      }
+    }
+    for(let i=s.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [s[i],s[j]]=[s[j],s[i]]; }
+    return s;
+  }
+  function log(msg){
+    const time = new Date().toLocaleTimeString();
+    const line = document.createElement('div');
+    line.textContent = `[${time}] ${msg}`;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+  function readSettings(){
+    const decks = clampInt(decksInput.value,1,8,6);
+    const pen   = clampFloat(penInput.value,0.5,0.95,0.8);
+    const speed = clampInt(speedInput.value,100,5000,700);
+    const cp    = clampInt(checkpointInput.value,10,200,26);
+    const mode  = modeSelect.value;
+    state.settings = { decks, pen, speed, checkpoint:cp, mode };
+  }
+  function initShoe(){
+    state.shoe = buildShoe(state.settings.decks);
+    state.cutIndex = Math.floor(state.shoe.length * state.settings.pen);
+    state.i=0; state.running=0; state.paused=false; state.results=[]; state.userChoice=null;
+    cardsEl.innerHTML=''; runningEl.textContent='0'; cardsSeenEl.textContent='0';
+    decksRemEl.textContent = state.settings.mode==='withDecks' ? (state.cutIndex/52).toFixed(2) : '—';
+    penBar.style.width='0%'; logEl.innerHTML='';
+    log(`New shoe: ${state.settings.decks} decks, ${Math.round(state.settings.pen*100)}% penetration.`);
+  }
+  function pickI18(){
+    const idx = Math.floor(Math.random()*I18.length);
+    return { play:I18[idx][0], action:I18[idx][1], thresh:I18[idx][2] };
+  }
+
+  // ==== Main Controls ====
+  function start(){ readSettings(); initShoe(); dealLoop(); }
+  function pause(){ state.paused = !state.paused; pauseBtn.textContent = state.paused ? 'Resume' : 'Pause'; }
+  function reset(){ if(state.timer){ clearTimeout(state.timer); } readSettings(); initShoe(); }
+
+  startBtn.addEventListener('click', start);
+  pauseBtn.addEventListener('click', pause);
+  resetBtn.addEventListener('click', reset);
+  i18Choices.forEach(el=>el.addEventListener('click',()=>{
+    i18Choices.forEach(c=>c.classList.remove('active'));
+    el.classList.add('active');
+    state.userChoice = el.dataset.choice;
+  }));
+
+  // ==== Dealing ====
+  function dealLoop(){
+    if(state.paused){ state.timer = setTimeout(dealLoop, 100); return; }
+    if(state.i >= state.cutIndex){ endShoe(); return; }
+
+    const card = state.shoe[state.i++];
+    const el = document.createElement('div'); el.className='card'+((card.suit==='\\u2665'||card.suit==='\\u2666')?' red':'');
+    const r = document.createElement('div'); r.className='rank'; r.textContent=card.rank;
+    const p = document.createElement('div'); p.className='pip'; p.textContent=card.suit;
+    el.append(r,p); cardsEl.appendChild(el);
+    if(cardsEl.children.length > 22) cardsEl.removeChild(cardsEl.firstChild);
+
+    state.running += HI_LO[card.rank];
+    const decksRem = (state.cutIndex - state.i)/52;
+    runningEl.textContent = state.running;
+    if(state.settings.mode==='withDecks'){ decksRemEl.textContent = decksRem.toFixed(2); }
+    cardsSeenEl.textContent = state.i;
+    penBar.style.width = ((state.i/state.cutIndex)*100).toFixed(1)+'%';
+
+    if(state.i % state.settings.checkpoint === 0){
+      showPrompt(state.i, state.running, decksRem>0? state.running/decksRem : state.running);
+    }
+
+    state.timer = setTimeout(dealLoop, state.settings.speed);
+  }
+
+  function endShoe(){
+    log('Reached cut card. Shoe complete.');
+    gradeSession();
+  }
+
+  // ==== Prompt & Grading ====
+  function showPrompt(index, corrRunning, corrTrue){
+    promptEl.style.display = 'grid';
+    cpIndexEl.textContent = index;
+    inRunning.value=''; inTrue.value='';
+    ansBox.style.display = 'none';
+    ansRunning.textContent = corrRunning;
+    ansTrue.textContent = corrTrue.toFixed(2);
+    currentTCEl.textContent = 'TC ' + corrTrue.toFixed(2);
+    i18Choices.forEach(c=>c.classList.remove('active')); state.userChoice = null;
+
+    const pick = pickI18();
+    i18Text.textContent = `${pick.play} — deviation: ${pick.action} at TC ${pick.thresh>=0? '≥ '+pick.thresh : '≤ '+pick.thresh}. Should you take it now?`;
+    i18Ans.innerHTML = '';
+
+    function gradeI18(tc){
+      const applies = pick.thresh >= 0 ? (tc >= pick.thresh) : (tc <= pick.thresh);
+      const correctChoice = applies ? 'deviation' : 'basic';
+      const ok = state.userChoice === correctChoice;
+      const explain = applies
+        ? `YES — deviation applies at TC ${tc.toFixed(2)}. Do: <strong>${pick.action}</strong> for ${pick.play}.`
+        : `NO — stick with basic strategy at TC ${tc.toFixed(2)} for ${pick.play}.`;
+      return { ok, explain };
+    }
+
+    function handle(reveal=false){
+      const userR = parseInt(inRunning.value||'0',10);
+      const userT = parseFloat(inTrue.value||'0');
+      const okR = (userR === corrRunning);
+      const okT = (Math.abs(userT - corrTrue) <= 0.25);
+      const g = gradeI18(corrTrue);
+      if(reveal){
+        ansBox.style.display='block';
+        i18Ans.innerHTML = g.explain;
+      } else {
+        promptEl.style.display='none';
+      }
+      state.results.push({ i:index, okR, okT, i18:g.ok, userR, userT, corrRunning, corrTrue:+corrTrue.toFixed(2) });
+      log(`CP ${index}: running ${okR?'✅':'❌'} (${userR} vs ${corrRunning}), true ${okT?'✅':'❌'} (${isNaN(userT)?'—':userT.toFixed(2)} vs ${corrTrue.toFixed(2)}), I18 ${g.ok?'✅':'❌'}`);
+    }
+
+    submitBtn.onclick = ()=>handle(false);
+    revealBtn.onclick = ()=>handle(true);
+  }
+
+  function gradeSession(){
+    if(state.results.length===0){ log('No checkpoints recorded.'); return; }
+    const rOK = state.results.filter(r=>r.okR).length / state.results.length;
+    const tOK = state.results.filter(r=>r.okT).length / state.results.length;
+    const iOK = state.results.filter(r=>r.i18).length / state.results.length;
+    const overall = (rOK + tOK + iOK)/3;
+    log(`★ Results: Running ${Math.round(rOK*100)}% | True ${Math.round(tOK*100)}% | I18 ${Math.round(iOK*100)}% | Overall ${Math.round(overall*100)}%`);
+    console.table(state.results);
+  }
+
+  // initial preview (paused)
+  (function init(){
+    readSettings();
+    state.paused = true;
+    // show initial empty state
+    decksRemEl.textContent = '—';
+  })();
+});
+</script>
+</body>
+</html>
